@@ -1,30 +1,63 @@
-name: CI
+name: DevSecOps CI - Bandit SAST
 
-on: [push]
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
 
 jobs:
- sast_scan:
-   name: Run Bandit Scan
-   runs-on: ubuntu-latest
+  sast_scan:
+    name: Bandit Security Scan
+    runs-on: ubuntu-latest
 
-   steps:
-   - name: Checkout code
-     uses: actions/checkout@v2
+    permissions:
+      contents: read
+      security-events: write  # required for SARIF upload
 
-   - name: Set up Python
-     uses: actions/setup-python@v2
-     with:
-       python-version: 3.8
+    steps:
+    # 1. Checkout repository
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-   - name: Install Bandit
-     run: pip install bandit
+    # 2. Set up Python with caching
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'  # enables dependency caching
 
-   - name: Run Bandit Scan
-     run: bandit -ll -ii -r . -f json -o bandit-report.json
+    # 3. Install dependencies
+    - name: Install Bandit
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit
 
-   - name: Upload Artifact
-     uses: actions/upload-artifact@v3
-     if: always()
-     with:
-      name: bandit-findings
-      path: bandit-report.json
+    # 4. Run Bandit (JSON + SARIF output)
+    - name: Run Bandit Scan
+      run: |
+        bandit -r . \
+          -ll -ii \
+          -f json -o bandit-report.json \
+          -f sarif -o bandit-report.sarif || true
+
+    # 5. Upload SARIF to GitHub Security tab
+    - name: Upload SARIF Report
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: bandit-report.sarif
+
+    # 6. Upload artifacts (for manual review)
+    - name: Upload Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: bandit-reports
+        path: |
+          bandit-report.json
+          bandit-report.sarif
+
+    # 7. Enforce security gate (fail on high severity)
+    - name: Enforce Security Gate
+      run: |
+        bandit -r . -ll -ii
